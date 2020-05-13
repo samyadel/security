@@ -3,7 +3,7 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const ejs = require("ejs");
 const mongoose = require("mongoose");
-const encrypt = require("mongoose-encryption");
+const md5 = require("md5");
 
 const app = express();
 
@@ -19,16 +19,6 @@ mongoose.connect("mongodb://localhost:27017/usersDB", {
 const userSchema = new mongoose.Schema({
   email: String,
   password: String,
-});
-
-// Encrypt the schema
-// This will take the secret string and use it to encrypt the password
-// You have to add the encrypt plugin before using it to create a model because you want to use the encrypted version of the schema
-// mongoose-encrypt encrypts when you call the save method (when saving a document to a collection)
-// mongoose-encrypt decrypts when you call the find method (when trying to find a specific document)
-userSchema.plugin(encrypt, {
-  secret: process.env.SECRET,
-  encryptedFields: ["password"],
 });
 
 const User = mongoose.model("User", userSchema);
@@ -51,7 +41,7 @@ app.post("/register", (req, res) => {
   // The password is going to be whatever the user inputs in the password field
   const user = new User({
     email: req.body.username,
-    password: req.body.password,
+    password: md5(req.body.password),
   });
 
   // Save the user to the database
@@ -62,10 +52,10 @@ app.post("/register", (req, res) => {
 
 app.post("/login", (req, res) => {
   const email = req.body.username;
-  const password = req.body.password;
+  const password = md5(req.body.password);
 
   // Find a user that has an email of whatever the user has inputed in the email field
-  // email #1 = the email of any user in the database
+  // email #1 = the email of the user in the database
   // email #2 = what the user inputs in the email field
   User.findOne({ email: email }, (err, foundUser) => {
     if (err) {
