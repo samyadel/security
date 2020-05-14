@@ -3,8 +3,9 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const ejs = require("ejs");
 const mongoose = require("mongoose");
-const bcrypt = require("bcrypt");
-const saltRounds = 10;
+const session = require("express-session");
+const passport = require("passport");
+const passportLocalMongoose = require("passport-local-mongoose");
 
 const app = express();
 
@@ -12,17 +13,43 @@ app.use(express.static("public"));
 app.set("view engine", "ejs");
 app.use(bodyParser.urlencoded({ extended: true }));
 
+// Use the session package
+app.use(
+  session({
+    secret:
+      "U%xBuT#r&6rrfkVabLN3w6s3hd2MobfQAvO5rT%Czh$fXFYZYc63$%xjx#mjwMYx3iaau!YxMsLfhapikR1%zwdZneN5pZyYXw&",
+    resave: false,
+    saveUninitialized: false,
+  })
+);
+
+// Use passport and initialise the passport package
+app.use(passport.initialize());
+// Use passport for dealing with the sessions
+app.use(passport.session());
+
 mongoose.connect("mongodb://localhost:27017/usersDB", {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 });
+
+// Fixes deprication warning
+mongoose.set("useCreateIndex", true);
 
 const userSchema = new mongoose.Schema({
   email: String,
   password: String,
 });
 
+// We are going to use passportLocalMongoose to hash and salt our passwords and to save our users into our mongoDB database
+userSchema.plugin(passportLocalMongoose);
+
 const User = mongoose.model("User", userSchema);
+
+passport.use(User.createStrategy());
+
+passport.serializeUser(User.serializeUser());
+passport.deserializeUser(User.deserializeUser());
 
 app.get("/", (req, res) => {
   res.render("home");
@@ -36,53 +63,62 @@ app.get("/register", (req, res) => {
   res.render("register");
 });
 
-app.post("/register", (req, res) => {
-  /* Parameters
-  1) What you want to hash
-  2) Salt Rounds
-  3) Callback function
-    Parameters
-    1) error
-    2) The hashed password
-  */
-  bcrypt.hash(req.body.password, saltRounds, (err, hash) => {
-    // Create a new user
-    // The user email is going to be whatever the user inputs in the email field
-    // The password is going to be whatever the user inputs in the password field
-    const user = new User({
-      email: req.body.username,
-      // Set the password to the hashed version of what the user inputed in the password field
-      password: hash,
-    });
+app.get("/secrets", (req, res) => {
+  // If the user is authenticated
+  if (req.isAuthenticated()) {
+    res.render("secrets");
+  } else {
+    res.redirect("/login");
+  }
+});
 
-    // Save the user to the database
-    user.save((err) => {
-      err ? console.log(err) : res.render("secrets");
-    });
+app.get("/logout", (req, res) => {
+  // Logout the user
+  req.logout();
+  res.redirect("/");
+});
+
+app.post("/register", (req, res) => {
+  // Register a new user with a username of whatever the user inputed in the email field and a password of whatever the user inputed in the password field
+  User.register({ username: req.body.username }, req.body.password, (err) => {
+    // If there was an error registering a new user
+    if (err) {
+      console.log(err);
+      res.redirect("/register");
+    } else {
+      // Authenticate a new user
+      passport.authenticate("local")(
+        // If this function gets called, the authentication was successful
+        req,
+        res,
+        () => {
+          res.redirect("/secrets");
+        }
+      );
+    }
   });
 });
 
 app.post("/login", (req, res) => {
-  const email = req.body.username;
-  const password = req.body.password;
+  // Create a new user with a username of whatever the user inputs in the username (email) field and a password of whatever the user inputs in the password field
+  const user = new User({
+    username: req.body.username,
+    password: req.body.password,
+  });
 
-  // Find a user that has an email of whatever the user has inputed in the email field
-  // email #1 = the email of the user in the database
-  // email #2 = what the user inputs in the email field
-  User.findOne({ email: email }, (err, foundUser) => {
+  // Login the user
+  /* Parameters
+  1) The user you want to login
+  2) A callback function that allows you to handle errors; if the user tries to login with the wron credentials, there will be an error
+  */
+  req.login(user, (err) => {
     if (err) {
       console.log(err);
     } else {
-      // If this user exists
-      if (foundUser) {
-        // If the password that the user has inputed (hashed version) is equal to the hashed password stored in the database
-        // result will either be true, if the password (hashed) is equal to the hashed password which is stored in the database, and will be false if the password (hashed) is not equal to the hashed password stored in the database
-        bcrypt.compare(password, foundUser.password, (err, result) => {
-          if (result) {
-            res.render("secrets");
-          }
-        });
-      }
+      // Authenticate the user that is trying to login
+      passport.authenticate("local")(req, res, () => {
+        res.redirect("/secrets");
+      });
     }
   });
 });
